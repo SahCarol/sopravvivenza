@@ -23,6 +23,14 @@
       <label>Nomes dos amigos (até 11 — deixe em branco os que não quiser):</label>
       <div id="grid-amigos" class="grid-amigos"></div>
 
+      <label for="input-dias">Duração estimada: <span id="dias-valor">25</span> dias</label>
+      <div class="slider-wrap">
+        <span class="slider-limite">10</span>
+        <input id="input-dias" type="range" min="10" max="40" step="1" value="25" />
+        <span class="slider-limite">40</span>
+      </div>
+      <p class="slider-dica">⚠️ O jogo <strong>não termina</strong> ao atingir esse número. Ele só termina quando o traidor for eliminado por votação ou quando todos os outros morrerem. O número serve para calcular a dificuldade e o ritmo.</p>
+
       <button id="btn-comecar">▶️ Começar Jogo</button>
       <p id="aviso-inicio" class="aviso"></p>
     </section>
@@ -36,12 +44,16 @@
           <span id="info-fase">🌅 Chegada</span>
         </div>
         <div>
-          <span id="info-comida">🍖 18</span>
-          <span id="info-agua">💧 18</span>
-          <span id="info-abrigo">⛺ 6</span>
+          <span id="info-comida">🍖 20</span>
+          <span id="info-agua">💧 20</span>
+          <span id="info-abrigo">⛺ 8</span>
           <span id="info-pistas">🔍 0</span>
         </div>
       </header>
+
+      <div id="aviso-espectador" class="oculto">
+        👻 <strong>MODO ESPECTADOR</strong> — você morreu, mas a história continua. Assista ao desfecho.
+      </div>
 
       <div id="painel-status"></div>
 
@@ -55,6 +67,7 @@
 
       <div id="acoes">
         <button id="btn-proximo-dia">▶️ Próximo Dia</button>
+        <button id="btn-pular" class="oculto">⏩ Pular para o Desfecho</button>
         <button id="btn-espiar" class="oculto">👁️ Espiar Traidor (debug)</button>
       </div>
 
