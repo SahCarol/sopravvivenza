@@ -1,18 +1,17 @@
 // ============================================================
 //  ilha-da-traicao — jogo.js
-//  Sobrevivência, Romance & Traição (versão web)
-//  v2.1.0 — 11 campos de amigos + localStorage + história expandida
+//  v4.0.0 — fim só quando o traidor é descoberto ou todos morrem
 // ============================================================
 
-const VERSAO = "2.1.0";
-const MAX_DIAS = 18;
+const VERSAO = "4.0.0";
 const STORAGE_KEY = "ilha-da-traicao-config";
 
 const TRACOS = [
   "engraçado(a)", "misterioso(a)", "protetor(a)", "impulsivo(a)",
   "calmo(a)", "ciumento(a)", "observador(a)", "manipulador(a)",
   "leal", "sarcástico(a)", "sonhador(a)", "desconfiado(a)",
-  "brincalhão(ona)", "silencioso(a)", "intenso(a)"
+  "brincalhão(ona)", "silencioso(a)", "intenso(a)", "vingativo(a)",
+  "carismático(a)", "reservado(a)"
 ];
 
 // ---------- utilitários ----------
@@ -33,6 +32,7 @@ const sortearVarios = (arr, n) => {
   }
   return res;
 };
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 // ---------- Personagem ----------
 class Personagem {
@@ -47,13 +47,14 @@ class Personagem {
     this.traidor = false;
     this.parRomantico = null;
     this.memorias = 0;
+    this.tentativasAssassinato = 0;
   }
 }
 
 // ---------- Estado ----------
 let estado = {};
 
-function novoJogo(nomeJogador, nomesAmigos) {
+function novoJogo(nomeJogador, nomesAmigos, duracao) {
   const jogador = new Personagem(nomeJogador, true);
   const personagens = [jogador, ...nomesAmigos.map(n => new Personagem(n))];
 
@@ -67,15 +68,29 @@ function novoJogo(nomeJogador, nomesAmigos) {
     dia: 1,
     clima: "ensolarado",
     fase: "Chegada",
-    recursos: { comida: 18, agua: 18, abrigo: 6 },
+    duracao: clamp(duracao, 10, 40),
+    recursos: { comida: 20, agua: 20, abrigo: 8 },
     investigacao: 0,
     pistasFalsas: 0,
     fim: false,
-    eventosUsados: new Set()
+    eventosUsados: new Set(),
+    traidorEliminadoPorVotacao: false,
+    votacoesFeitas: 0,
+    intervaloVotacao: 4,
+    eventosPorDia: 4,
+    diaInicioTraicao: 2,
+    espectador: false,
+    mortesRecentes: 0
   };
+
+  const D = estado.duracao;
+  estado.intervaloVotacao = clamp(Math.round(D / 6), 3, 5);
+  estado.eventosPorDia   = clamp(Math.round(3 + D / 20), 3, 5);
+  estado.diaInicioTraicao = D <= 15 ? 2 : D <= 25 ? 3 : 4;
 }
 
 const vivos = () => estado.personagens.filter(p => p.status === "vivo");
+const inocentesVivos = () => vivos().filter(p => !p.traidor);
 
 function ajustarAfeto(a, b, qtd) {
   a.afeto = Math.max(0, Math.min(100, a.afeto + qtd));
@@ -93,94 +108,145 @@ function escolherEvento(lista) {
   const disponiveis = lista.filter(e => !estado.eventosUsados.has(e.id));
   const escolhido = aleatorio(disponiveis.length ? disponiveis : lista);
   estado.eventosUsados.add(escolhido.id);
-  if (estado.eventosUsados.size > 60) estado.eventosUsados.clear();
+  if (estado.eventosUsados.size > 120) estado.eventosUsados.clear();
   return escolhido;
 }
 
 // ============================================================
-//  BIBLIOTECA DE EVENTOS
+//  EVENTOS (mesmos 111 da v3)
 // ============================================================
-
 const EVENTOS_VIDA = [
-  { id: "v1",  txt: p => `🌿 ${p.nome} encontrou um pé de frutas silvestres. O grupo comeu melhor hoje. (+4 comida)`, fn: () => ajustarRecurso("comida", 4) },
-  { id: "v2",  txt: p => `💧 ${p.nome} descobriu um riacho escondido entre as pedras. (+4 água)`, fn: () => ajustarRecurso("agua", 4) },
-  { id: "v3",  txt: p => `⛺ ${p.nome} passou o dia reforçando o abrigo com galhos e folhas. (+2 abrigo)`, fn: () => ajustarRecurso("abrigo", 2) },
-  { id: "v4",  txt: p => `🩸 ${p.nome} escorregou em uma rocha e torceu o tornozelo. (-20 energia)`, fn: p => { p.energia = Math.max(0, p.energia - 20); p.status = "ferido"; } },
-  { id: "v5",  txt: () => `🌪️ Uma tempestade varreu o acampamento. Parte do abrigo foi perdida. (-2 abrigo)`, fn: () => ajustarRecurso("abrigo", -2) },
-  { id: "v6",  txt: p => `🐟 ${p.nome} conseguiu pescar com uma lança improvisada. (+3 comida)`, fn: () => ajustarRecurso("comida", 3) },
-  { id: "v7",  txt: p => `🍯 ${p.nome} achou um favo de mel numa árvore oca. (+2 comida, +5 energia geral)`, fn: () => { ajustarRecurso("comida", 2); vivos().forEach(v => v.energia = Math.min(100, v.energia + 5)); } },
-  { id: "v8",  txt: p => `🐍 ${p.nome} quase pisou numa cobra. Sobreviveu, mas abalado(a). (-10 energia)`, fn: p => p.energia = Math.max(0, p.energia - 10) },
-  { id: "v9",  txt: p => `🔥 ${p.nome} acendeu uma fogueira com pedras. Noite aquecida. (+1 abrigo, +5 energia geral)`, fn: () => { ajustarRecurso("abrigo", 1); vivos().forEach(v => v.energia = Math.min(100, v.energia + 5)); } },
-  { id: "v10", txt: p => `🥥 ${p.nome} derrubou cocos de uma palmeira. (+2 comida, +2 água)`, fn: () => { ajustarRecurso("comida", 2); ajustarRecurso("agua", 2); } },
-  { id: "v11", txt: p => `🏕️ ${p.nome} organizou o acampamento e todos dormiram melhor. (+8 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.min(100, v.energia + 8)) },
-  { id: "v12", txt: p => `🐗 Um javali atacou ${p.nome}. Ferimentos sérios. (-30 energia)`, fn: p => { p.energia = Math.max(0, p.energia - 30); p.status = "ferido"; } },
-  { id: "v13", txt: p => `🌊 ${p.nome} encontrou conchas com água da chuva. (+2 água)`, fn: () => ajustarRecurso("agua", 2) },
-  { id: "v14", txt: p => `🪵 ${p.nome} trouxe muita lenha. Noite mais quente. (+1 abrigo)`, fn: () => ajustarRecurso("abrigo", 1) },
-  { id: "v15", txt: () => `🌧️ Choveu a noite toda. Água transbordou, mas todos exaustos. (+6 água, -8 energia geral)`, fn: () => { ajustarRecurso("agua", 6); vivos().forEach(v => v.energia = Math.max(0, v.energia - 8)); } },
+  { id: "v1",  txt: p => `🌿 ${p.nome} encontrou um pé de frutas silvestres. (+4 comida)`, fn: () => ajustarRecurso("comida", 4) },
+  { id: "v2",  txt: p => `💧 ${p.nome} descobriu um riacho escondido. (+4 água)`, fn: () => ajustarRecurso("agua", 4) },
+  { id: "v3",  txt: p => `⛺ ${p.nome} reforçou o abrigo. (+2 abrigo)`, fn: () => ajustarRecurso("abrigo", 2) },
+  { id: "v4",  txt: p => `🩸 ${p.nome} torceu o tornozelo. (-20 energia)`, fn: p => { p.energia = Math.max(0, p.energia - 20); p.status = "ferido"; } },
+  { id: "v5",  txt: () => `🌪️ Tempestade. (-2 abrigo)`, fn: () => ajustarRecurso("abrigo", -2) },
+  { id: "v6",  txt: p => `🐟 ${p.nome} pescou. (+3 comida)`, fn: () => ajustarRecurso("comida", 3) },
+  { id: "v7",  txt: p => `🍯 ${p.nome} achou mel. (+2 comida, +5 energia geral)`, fn: () => { ajustarRecurso("comida", 2); vivos().forEach(v => v.energia = Math.min(100, v.energia + 5)); } },
+  { id: "v8",  txt: p => `🐍 ${p.nome} quase pisou numa cobra. (-10 energia)`, fn: p => p.energia = Math.max(0, p.energia - 10) },
+  { id: "v9",  txt: p => `🔥 ${p.nome} acendeu fogueira. (+1 abrigo, +5 energia)`, fn: () => { ajustarRecurso("abrigo", 1); vivos().forEach(v => v.energia = Math.min(100, v.energia + 5)); } },
+  { id: "v10", txt: p => `🥥 ${p.nome} derrubou cocos. (+2 comida, +2 água)`, fn: () => { ajustarRecurso("comida", 2); ajustarRecurso("agua", 2); } },
+  { id: "v11", txt: p => `🏕️ ${p.nome} organizou o acampamento. (+8 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.min(100, v.energia + 8)) },
+  { id: "v12", txt: p => `🐗 Javali atacou ${p.nome}. (-30 energia)`, fn: p => { p.energia = Math.max(0, p.energia - 30); p.status = "ferido"; } },
+  { id: "v13", txt: p => `🌊 ${p.nome} achou água em conchas. (+2 água)`, fn: () => ajustarRecurso("agua", 2) },
+  { id: "v14", txt: p => `🪵 ${p.nome} trouxe lenha. (+1 abrigo)`, fn: () => ajustarRecurso("abrigo", 1) },
+  { id: "v15", txt: () => `🌧️ Chuva forte. (+6 água, -8 energia geral)`, fn: () => { ajustarRecurso("agua", 6); vivos().forEach(v => v.energia = Math.max(0, v.energia - 8)); } },
+  { id: "v16", txt: p => `🪤 ${p.nome} pegou coelho. (+3 comida)`, fn: () => ajustarRecurso("comida", 3) },
+  { id: "v17", txt: p => `🌱 ${p.nome} começou uma horta. (+5 comida)`, fn: () => ajustarRecurso("comida", 5) },
+  { id: "v18", txt: p => `🦀 ${p.nome} achou caranguejos. (+4 comida)`, fn: () => ajustarRecurso("comida", 4) },
+  { id: "v19", txt: p => `🧗 ${p.nome} escalou árvore. (+2 comida, -5 energia)`, fn: p => { ajustarRecurso("comida", 2); p.energia = Math.max(0, p.energia - 5); } },
+  { id: "v20", txt: p => `💦 ${p.nome} caiu no rio. (-10 energia, +3 água)`, fn: p => { p.energia = Math.max(0, p.energia - 10); ajustarRecurso("agua", 3); } },
+  { id: "v21", txt: () => `🌊 Maré molhou mantimentos. (-2 comida)`, fn: () => ajustarRecurso("comida", -2) },
+  { id: "v22", txt: p => `🌾 ${p.nome} achou plantas comestíveis. (+5 comida)`, fn: () => ajustarRecurso("comida", 5) },
 ];
 
 const EVENTOS_ROMANCE = [
-  { id: "r1",  txt: (p, j) => `💕 ${p.nome} e ${j.nome} conversaram sob as estrelas até tarde. Algo mudou.`, fn: (p, j) => ajustarAfeto(p, j, 18) },
-  { id: "r2",  txt: (p, j) => `😳 ${p.nome} salvou ${j.nome} de uma queda. O olhar durou mais que o normal.`, fn: (p, j) => ajustarAfeto(p, j, 22) },
-  { id: "r3",  txt: (p, j) => `💔 ${p.nome} evitou ${j.nome} o dia todo. Um mal-entendido pairou no ar.`, fn: (p, j) => ajustarAfeto(p, j, -12) },
-  { id: "r4",  txt: (p, j) => `🤝 ${p.nome} confiou um segredo a ${j.nome}. Confiança rara.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
-  { id: "r5",  txt: (p, j) => `🌅 ${p.nome} e ${j.nome} viram o nascer do sol juntos em silêncio.`, fn: (p, j) => ajustarAfeto(p, j, 15) },
-  { id: "r6",  txt: (p, j) => `🎶 ${p.nome} cantou baixinho para ${j.nome} dormir. O grupo ouviu.`, fn: (p, j) => ajustarAfeto(p, j, 10) },
-  { id: "r7",  txt: (p, j) => `💌 ${p.nome} deixou uma flor na "cama" de ${j.nome}. Quem será que viu?`, fn: (p, j) => ajustarAfeto(p, j, 14) },
-  { id: "r8",  txt: (p, j) => `🌧️ Presos pela chuva sob o mesmo abrigo, ${p.nome} e ${j.nome} riram até tarde.`, fn: (p, j) => ajustarAfeto(p, j, 16) },
-  { id: "r9",  txt: (p, j) => `🫂 ${p.nome} abraçou ${j.nome} quando ele(a) desabou de cansaço.`, fn: (p, j) => ajustarAfeto(p, j, 20) },
-  { id: "r10", txt: (p, j) => `😤 ${p.nome} e ${j.nome} discutiram por ciúmes. Tensão visível.`, fn: (p, j) => ajustarAfeto(p, j, -15) },
-  { id: "r11", txt: (p, j) => `🌺 ${p.nome} fez uma pulseira de cipó para ${j.nome}. Gestos simples valem ouro.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
-  { id: "r12", txt: (p, j) => `🔥 Perto do fogo, ${p.nome} e ${j.nome} falaram sobre o futuro — se sobrevivessem.`, fn: (p, j) => ajustarAfeto(p, j, 15) },
+  { id: "r1",  txt: (p, j) => `💕 ${p.nome} e ${j.nome} conversaram sob as estrelas.`, fn: (p, j) => ajustarAfeto(p, j, 18) },
+  { id: "r2",  txt: (p, j) => `😳 ${p.nome} salvou ${j.nome} de uma queda.`, fn: (p, j) => ajustarAfeto(p, j, 22) },
+  { id: "r3",  txt: (p, j) => `💔 ${p.nome} evitou ${j.nome} o dia todo.`, fn: (p, j) => ajustarAfeto(p, j, -12) },
+  { id: "r4",  txt: (p, j) => `🤝 ${p.nome} confiou um segredo a ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
+  { id: "r5",  txt: (p, j) => `🌅 ${p.nome} e ${j.nome} viram o nascer do sol.`, fn: (p, j) => ajustarAfeto(p, j, 15) },
+  { id: "r6",  txt: (p, j) => `🎶 ${p.nome} cantou para ${j.nome} dormir.`, fn: (p, j) => ajustarAfeto(p, j, 10) },
+  { id: "r7",  txt: (p, j) => `💌 ${p.nome} deixou uma flor para ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 14) },
+  { id: "r8",  txt: (p, j) => `🌧️ Presos pela chuva, ${p.nome} e ${j.nome} riram.`, fn: (p, j) => ajustarAfeto(p, j, 16) },
+  { id: "r9",  txt: (p, j) => `🫂 ${p.nome} abraçou ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 20) },
+  { id: "r10", txt: (p, j) => `😤 ${p.nome} e ${j.nome} brigaram por ciúmes.`, fn: (p, j) => ajustarAfeto(p, j, -15) },
+  { id: "r11", txt: (p, j) => `🌺 ${p.nome} fez pulseira para ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
+  { id: "r12", txt: (p, j) => `🔥 ${p.nome} e ${j.nome} falaram do futuro.`, fn: (p, j) => ajustarAfeto(p, j, 15) },
+  { id: "r13", txt: (p, j) => `💋 ${p.nome} beijou ${j.nome} de surpresa.`, fn: (p, j) => ajustarAfeto(p, j, 25) },
+  { id: "r14", txt: (p, j) => `🌙 ${p.nome} e ${j.nome} dormiram de mãos dadas.`, fn: (p, j) => ajustarAfeto(p, j, 20) },
+  { id: "r15", txt: (p, j) => `🎁 ${p.nome} deu presente a ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 14) },
+  { id: "r16", txt: (p, j) => `👀 ${p.nome} flagrou ${j.nome} olhando.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
+  { id: "r17", txt: (p, j) => `🌠 ${p.nome} e ${j.nome} fizeram pedido juntos.`, fn: (p, j) => ajustarAfeto(p, j, 15) },
+  { id: "r18", txt: (p, j) => `😔 ${p.nome} revelou medo a ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 18) },
+  { id: "r19", txt: (p, j) => `🥺 ${p.nome} pediu desculpas a ${j.nome}.`, fn: (p, j) => ajustarAfeto(p, j, 12) },
+  { id: "r20", txt: (p, j) => `💍 ${p.nome} prometeu a ${j.nome} sobreviver juntos.`, fn: (p, j) => ajustarAfeto(p, j, 22) },
 ];
 
 const EVENTOS_CONFLITO = [
-  { id: "c1", txt: (a, b) => `⚡ ${a.nome} acusou ${b.nome} de roubar comida. Gritos no acampamento.`, fn: (a, b) => { ajustarSuspeita(a, 8); ajustarSuspeita(b, 8); ajustarAfeto(a, b, -8); } },
-  { id: "c2", txt: (a, b) => `😤 ${a.nome} e ${b.nome} brigaram sobre quem deveria liderar o grupo.`, fn: (a, b) => { ajustarSuspeita(a, 6); ajustarSuspeita(b, 6); ajustarAfeto(a, b, -6); } },
-  { id: "c3", txt: (a, b) => `🔪 ${a.nome} foi visto(a) sussurrando com ${b.nome} tarde da noite.`, fn: (a, b) => ajustarSuspeita(a, 10) },
-  { id: "c4", txt: (a, b) => `👀 ${a.nome} desconfia que ${b.nome} está escondendo algo nas roupas.`, fn: (a, b) => ajustarSuspeita(b, 12) },
-  { id: "c5", txt: (a, b) => `🥊 ${a.nome} empurrou ${b.nome} durante uma discussão. Quase virou briga.`, fn: (a, b) => { ajustarSuspeita(a, 10); ajustarAfeto(a, b, -12); } },
-  { id: "c6", txt: (a, b) => `😡 ${a.nome} humilhou ${b.nome} na frente de todos. O grupo ficou dividido.`, fn: (a, b) => { ajustarSuspeita(a, 12); ajustarAfeto(a, b, -15); } },
-  { id: "c7", txt: (a, b) => `🗣️ ${a.nome} contou um segredo de ${b.nome} para o grupo. Traição de confiança.`, fn: (a, b) => { ajustarSuspeita(a, 15); ajustarAfeto(a, b, -18); } },
-  { id: "c8", txt: (a, b) => `🧊 ${a.nome} fingiu não ouvir ${b.nome} pedindo ajuda com a comida.`, fn: (a, b) => ajustarAfeto(a, b, -8) },
-  { id: "c9", txt: (a, b) => `🌀 ${a.nome} e ${b.nome} se entreolharam de forma estranha após um barulho na mata.`, fn: (a, b) => { ajustarSuspeita(a, 7); ajustarSuspeita(b, 7); } },
+  { id: "c1",  txt: (a, b) => `⚡ ${a.nome} acusou ${b.nome} de roubar comida.`, fn: (a, b) => { ajustarSuspeita(a, 8); ajustarSuspeita(b, 8); ajustarAfeto(a, b, -8); } },
+  { id: "c2",  txt: (a, b) => `😤 ${a.nome} e ${b.nome} brigaram por liderança.`, fn: (a, b) => { ajustarSuspeita(a, 6); ajustarSuspeita(b, 6); ajustarAfeto(a, b, -6); } },
+  { id: "c3",  txt: (a, b) => `🔪 ${a.nome} sussurrou com ${b.nome} à noite.`, fn: (a, b) => ajustarSuspeita(a, 10) },
+  { id: "c4",  txt: (a, b) => `👀 ${a.nome} desconfia de ${b.nome}.`, fn: (a, b) => ajustarSuspeita(b, 12) },
+  { id: "c5",  txt: (a, b) => `🥊 ${a.nome} empurrou ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 10); ajustarAfeto(a, b, -12); } },
+  { id: "c6",  txt: (a, b) => `😡 ${a.nome} humilhou ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 12); ajustarAfeto(a, b, -15); } },
+  { id: "c7",  txt: (a, b) => `🗣️ ${a.nome} contou segredo de ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 15); ajustarAfeto(a, b, -18); } },
+  { id: "c8",  txt: (a, b) => `🧊 ${a.nome} ignorou ${b.nome}.`, fn: (a, b) => ajustarAfeto(a, b, -8) },
+  { id: "c9",  txt: (a, b) => `🌀 ${a.nome} e ${b.nome} se entreolharam estranho.`, fn: (a, b) => { ajustarSuspeita(a, 7); ajustarSuspeita(b, 7); } },
+  { id: "c10", txt: (a, b) => `🔥 ${a.nome} e ${b.nome} gritaram um com o outro.`, fn: (a, b) => { ajustarAfeto(a, b, -20); a.energia = Math.max(0, a.energia - 5); } },
+  { id: "c11", txt: (a, b) => `🍽️ ${a.nome} comeu porção de ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 14); ajustarAfeto(a, b, -15); } },
+  { id: "c12", txt: (a, b) => `🤬 ${a.nome} chamou ${b.nome} de inútil.`, fn: (a, b) => { ajustarAfeto(a, b, -22); ajustarSuspeita(a, 10); } },
+  { id: "c13", txt: (a, b) => `🗡️ ${a.nome} ameaçou ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 20); ajustarAfeto(a, b, -25); } },
+  { id: "c14", txt: (a, b) => `💢 ${a.nome} quebrou objeto de ${b.nome}.`, fn: (a, b) => { ajustarAfeto(a, b, -18); ajustarSuspeita(a, 12); } },
+  { id: "c15", txt: (a, b) => `🤐 ${a.nome} e ${b.nome} pararam de se falar.`, fn: (a, b) => ajustarAfeto(a, b, -25) },
+  { id: "c16", txt: (a, b) => `💔 ${a.nome} descobriu mentira de ${b.nome}.`, fn: (a, b) => { ajustarAfeto(a, b, -20); ajustarSuspeita(b, 15); } },
+  { id: "c17", txt: (a, b) => `🤜 ${a.nome} deu soco em ${b.nome}.`, fn: (a, b) => { ajustarAfeto(a, b, -30); ajustarSuspeita(a, 18); b.energia = Math.max(0, b.energia - 15); } },
+  { id: "c18", txt: (a, b) => `🥀 ${a.nome} humilhou passado de ${b.nome}.`, fn: (a, b) => { ajustarAfeto(a, b, -22); ajustarSuspeita(a, 14); } },
+  { id: "c19", txt: (a, b) => `🚫 ${a.nome} negou água a ${b.nome}.`, fn: (a, b) => { ajustarAfeto(a, b, -18); b.energia = Math.max(0, b.energia - 8); } },
+  { id: "c20", txt: (a, b) => `😠 ${a.nome} e ${b.nome} discutiram sobre vigia.`, fn: (a, b) => ajustarAfeto(a, b, -10) },
+  { id: "c21", txt: (a, b) => `🕵️ ${a.nome} acusou ${b.nome} de ser traidor.`, fn: (a, b) => { ajustarSuspeita(b, 25); ajustarAfeto(a, b, -20); } },
+  { id: "c22", txt: (a, b) => `🧨 ${a.nome} sabotou comida de ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 22); ajustarAfeto(a, b, -20); } },
+  { id: "c23", txt: (a, b) => `😈 ${a.nome} espalhou boato sobre ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(b, 15); ajustarAfeto(a, b, -15); } },
+  { id: "c24", txt: (a, b) => `☠️ ${a.nome} jurou vingança contra ${b.nome}.`, fn: (a, b) => { ajustarSuspeita(a, 25); ajustarAfeto(a, b, -30); } },
 ];
 
 const EVENTOS_INVESTIGACAO = [
-  { id: "i1", txt: alvo => `🔍 Você encontrou uma faca escondida perto do "quarto" de ${alvo.nome}.`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 20); } },
-  { id: "i2", txt: alvo => `🔍 Pegadas estranhas levam até ${alvo.nome}, que estava fora do acampamento à noite.`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 18); } },
-  { id: "i3", txt: alvo => `🔍 Você viu ${alvo.nome} enterrando algo atrás de uma árvore. Quando voltou, não havia nada.`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 22); } },
-  { id: "i4", txt: alvo => `🔍 Uma corda cortada foi encontrada perto de onde ${alvo.nome} dorme.`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 16); } },
-  { id: "i5", txt: alvo => `🔍 Você achou um bilhete com a letra de ${alvo.nome}... mas o conteúdo não fazia sentido.`, fn: alvo => { estado.pistasFalsas++; ajustarSuspeita(alvo, 10); } },
-  { id: "i6", txt: alvo => `🔍 ${alvo.nome} estava com as mãos sujas de terra quando todos acordaram.`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 14); } },
-  { id: "i7", txt: alvo => `🔍 Você ouviu ${alvo.nome} falando sozinho(a) sobre "acabar logo com isso".`, fn: alvo => { estado.investigacao++; ajustarSuspeita(alvo, 18); } },
-  { id: "i8", txt: alvo => `🔍 Pista falsa: alguém plantou um pertence de ${alvo.nome} na cena de um incidente.`, fn: alvo => { estado.pistasFalsas++; ajustarSuspeita(alvo, 12); } },
+  { id: "i1",  txt: a => `🔍 Faca escondida perto de ${a.nome}.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 20); } },
+  { id: "i2",  txt: a => `🔍 Pegadas levam a ${a.nome} fora do acampamento.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 18); } },
+  { id: "i3",  txt: a => `🔍 Você viu ${a.nome} enterrando algo.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 22); } },
+  { id: "i4",  txt: a => `🔍 Corda cortada perto de ${a.nome}.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 16); } },
+  { id: "i5",  txt: a => `🔍 Bilhete suspeito de ${a.nome}.`, fn: a => { estado.pistasFalsas++; ajustarSuspeita(a, 10); } },
+  { id: "i6",  txt: a => `🔍 ${a.nome} com mãos sujas de terra.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 14); } },
+  { id: "i7",  txt: a => `🔍 ${a.nome} falando "acabar logo com isso".`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 18); } },
+  { id: "i8",  txt: a => `🔍 Pista falsa perto de ${a.nome}.`, fn: a => { estado.pistasFalsas++; ajustarSuspeita(a, 12); } },
+  { id: "i9",  txt: a => `🔍 ${a.nome} observando o acampamento.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 15); } },
+  { id: "i10", txt: a => `🔍 ${a.nome} mexendo nas ferramentas.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 20); } },
+  { id: "i11", txt: a => `🔍 ${a.nome} com arranhão suspeito.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 12); } },
+  { id: "i12", txt: a => `🔍 Comida escondida de ${a.nome}.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 18); } },
+  { id: "i13", txt: a => `🔍 Nota anônima acusando ${a.nome}.`, fn: a => { estado.pistasFalsas++; ajustarSuspeita(a, 14); } },
+  { id: "i14", txt: a => `🔍 ${a.nome} não dormiu esta noite.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 15); } },
+  { id: "i15", txt: a => `🔍 ${a.nome} trocando olhares à noite.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 10); } },
+  { id: "i16", txt: a => `🔍 Sangue na roupa de ${a.nome}.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 25); } },
+  { id: "i17", txt: a => `🔍 ${a.nome} apagou pegadas.`, fn: a => { estado.investigacao++; ajustarSuspeita(a, 20); } },
+  { id: "i18", txt: a => `🔍 Carta "confissão" perto de ${a.nome}.`, fn: a => { estado.pistasFalsas++; ajustarSuspeita(a, 16); } },
 ];
 
 const EVENTOS_DESCOBERTA = [
-  { id: "d1", txt: () => `🗿 O grupo encontrou uma estátua de pedra coberta de musgo. Ninguém sabe quem a fez.` },
-  { id: "d2", txt: () => `📜 Uma garrafa com um bilhete chegou à praia: "Não confiem em todos."` },
-  { id: "d3", txt: () => `🕳️ Uma caverna foi encontrada na encosta. Vazia, mas com marcas de fogueiras antigas.` },
-  { id: "d4", txt: () => `🦴 Ossos de um animal grande foram achados na mata. O grupo evitou a área.` },
-  { id: "d5", txt: () => `📻 Um rádio quebrado foi achado nos destroços do barco. Sem bateria, mas dá esperança.` },
-  { id: "d6", txt: () => `🌫️ Uma névoa estranha cobriu a ilha pela manhã. Todos ficaram inquietos.` },
-  { id: "d7", txt: () => `🪞 Um espelho antigo apareceu numa cabana abandonada. Ninguém entendeu como.` },
-  { id: "d8", txt: () => `🐦 Pássaros migraram para longe da ilha. Sinal de que algo está por vir.` },
+  { id: "d1",  txt: () => `🗿 Estátua de pedra coberta de musgo.` },
+  { id: "d2",  txt: () => `📜 Garrafa com bilhete: "Não confiem em todos."` },
+  { id: "d3",  txt: () => `🕳️ Caverna com fogueiras antigas.` },
+  { id: "d4",  txt: () => `🦴 Ossos de animal grande.` },
+  { id: "d5",  txt: () => `📻 Rádio quebrado nos destroços.` },
+  { id: "d6",  txt: () => `🌫️ Névoa estranha cobriu a ilha.` },
+  { id: "d7",  txt: () => `🪞 Espelho antigo numa cabana.` },
+  { id: "d8",  txt: () => `🐦 Pássaros migraram para longe.` },
+  { id: "d9",  txt: () => `📓 Diário: "Ele não era quem dizia ser..."` },
+  { id: "d10", txt: () => `🪦 Lápide no meio da mata.` },
+  { id: "d11", txt: () => `🎒 Mochila de alguém que não está mais vivo.` },
+  { id: "d12", txt: () => `🗺️ Mapa com "X" vermelho.` },
+  { id: "d13", txt: () => `🧭 Bússola quebrada apontando para a mata.` },
+  { id: "d14", txt: () => `🌋 Fumaça de montanha distante.` },
+  { id: "d15", txt: () => `💀 Esqueleto humano com pulseira conhecida.` },
 ];
 
 const EVENTOS_NOITE = [
-  { id: "n1", txt: () => `🌙 Barulhos estranhos vieram da mata durante a noite. Ninguém dormiu bem. (-6 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.max(0, v.energia - 6)) },
-  { id: "n2", txt: p => `🌌 ${p.nome} ficou de vigia e jurou ter visto uma sombra se movendo.`, fn: p => ajustarSuspeita(p, 5) },
-  { id: "n3", txt: p => `🕯️ ${p.nome} não conseguiu dormir. Ficou olhando o mar por horas.`, fn: p => p.energia = Math.max(0, p.energia - 5) },
-  { id: "n4", txt: () => `🌠 Uma chuva de estrelas cruzou o céu. Por um instante, todos esqueceram o perigo.` },
-  { id: "n5", txt: () => `👣 Pegadas foram encontradas perto do acampamento ao amanhecer. De quem são?`, fn: () => { const v = aleatorio(vivos()); if (v) ajustarSuspeita(v, 6); } },
-  { id: "n6", txt: () => `🥶 A noite foi gelada. O grupo se apertou para se aquecer.`, fn: () => { const v = vivos(); v.forEach(a => v.forEach(b => { if (a !== b) ajustarAfeto(a, b, 2); })); } },
+  { id: "n1",  txt: () => `🌙 Barulhos na mata. (-6 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.max(0, v.energia - 6)) },
+  { id: "n2",  txt: p => `🌌 ${p.nome} viu sombra na vigia.`, fn: p => ajustarSuspeita(p, 5) },
+  { id: "n3",  txt: p => `🕯️ ${p.nome} não dormiu.`, fn: p => p.energia = Math.max(0, p.energia - 5) },
+  { id: "n4",  txt: () => `🌠 Chuva de estrelas.` },
+  { id: "n5",  txt: () => `👣 Pegadas ao redor do acampamento.`, fn: () => { const v = aleatorio(vivos()); if (v) ajustarSuspeita(v, 6); } },
+  { id: "n6",  txt: () => `🥶 Noite gelada.`, fn: () => { const v = vivos(); v.forEach(a => v.forEach(b => { if (a !== b) ajustarAfeto(a, b, 2); })); } },
+  { id: "n7",  txt: p => `🩸 ${p.nome} acordou com arranhões.`, fn: p => { p.energia = Math.max(0, p.energia - 10); ajustarSuspeita(p, 8); } },
+  { id: "n8",  txt: () => `🔦 Alguém andou à noite. Ninguém assume.`, fn: () => { const v = aleatorio(vivos()); if (v) ajustarSuspeita(v, 10); } },
+  { id: "n9",  txt: p => `🗣️ ${p.nome} conversando sozinho.`, fn: p => ajustarSuspeita(p, 7) },
+  { id: "n10", txt: () => `😱 Grito na madrugada. (-4 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.max(0, v.energia - 4)) },
+  { id: "n11", txt: p => `🔥 ${p.nome} manteve o fogo aceso. (+4 energia geral)`, fn: () => vivos().forEach(v => v.energia = Math.min(100, v.energia + 4)) },
+  { id: "n12", txt: () => `🌊 Maré subiu.`, fn: () => vivos().forEach(v => v.energia = Math.max(0, v.energia - 5)) },
 ];
 
 // ============================================================
 //  MOTOR DE EVENTOS
 // ============================================================
-
 function rodarEventoVida() {
   const ev = escolherEvento(EVENTOS_VIDA);
   const p = aleatorio(vivos());
@@ -197,7 +263,6 @@ function rodarEventoRomance() {
   const ev = escolherEvento(EVENTOS_ROMANCE);
   let texto = ev.txt(p, estado.jogador);
   ev.fn(p, estado.jogador);
-
   let extra = "";
   if (p.afeto >= 50 && !p.parRomantico) {
     p.parRomantico = estado.jogador.nome;
@@ -254,41 +319,55 @@ function rodarEventoTraicao() {
   const pesos = vitimas.map(v => 1 + Math.floor(v.afeto / 20) + (v.isPlayer ? 3 : 0));
   const vitima = aleatorioPonderado(vitimas, pesos);
 
-  let chance = 0.55 - estado.traidor.suspeita / 200 + (100 - vitima.energia) / 300;
-  chance = Math.max(0.12, Math.min(0.85, chance));
+  // Letalidade: base + progresso do dia em relação à duração (mas nunca 0)
+  const progresso = clamp(estado.dia / estado.duracao, 0, 1.2);
+  let chanceBase = 0.15 + progresso * 0.55;
+  let chance = chanceBase - estado.traidor.suspeita / 200 + (100 - vitima.energia) / 400;
+  chance = Math.max(0.08, Math.min(0.80, chance));
+
+  estado.traidor.tentativasAssassinato++;
+  if (estado.traidor.tentativasAssassinato % 3 === 0) {
+    ajustarSuspeita(estado.traidor, 12);
+  }
 
   if (Math.random() < chance) {
     vitima.status = "morto";
     vitima.energia = 0;
-    ajustarSuspeita(estado.traidor, 15);
+    ajustarSuspeita(estado.traidor, 10);
+    estado.mortesRecentes++;
     return { txt: `💀 ${vitima.nome} foi encontrado(a) morto(a) esta manhã.\nNinguém viu nada. O grupo está em pânico.`, classe: "morte" };
   }
   vitima.status = "ferido";
   vitima.energia = Math.max(10, vitima.energia - 30);
-  ajustarSuspeita(estado.traidor, 25);
+  ajustarSuspeita(estado.traidor, 20);
   ajustarAfeto(vitima, estado.jogador, 5);
-  return { txt: `⚠️ ${vitima.nome} sofreu uma tentativa de assassinato durante a noite!\nSobreviveu, mas está ferido(a) e desconfia de todos.`, classe: "destaque" };
+  return { txt: `⚠️ ${vitima.nome} sofreu uma tentativa de assassinato durante a noite!\nSobreviveu, mas está ferido(a).`, classe: "destaque" };
 }
 
 // ============================================================
-//  FASES
+//  FASES (proporcionais à duração)
 // ============================================================
 function faseAtual() {
-  if (estado.dia <= 3) return "Chegada";
-  if (estado.dia <= 7) return "Organização";
-  if (estado.dia <= 12) return "Tensão";
-  if (estado.dia <= 15) return "Paranoia";
-  return "Desespero";
+  const p = clamp(estado.dia / estado.duracao, 0, 1);
+  if (p <= 0.12) return "Chegada";
+  if (p <= 0.28) return "Organização";
+  if (p <= 0.44) return "Tensão";
+  if (p <= 0.56) return "Desconfiança";
+  if (p <= 0.68) return "Paranoia";
+  if (p <= 0.84) return "Desespero";
+  return "Colapso";
 }
 
 function pesosPorFase() {
   switch (faseAtual()) {
-    case "Chegada":     return [50, 25, 10, 5,  10, 0];
-    case "Organização": return [40, 25, 15, 10, 10, 0];
-    case "Tensão":      return [30, 20, 20, 15, 5,  10];
-    case "Paranoia":    return [22, 18, 20, 22, 3,  15];
-    case "Desespero":   return [20, 15, 20, 25, 0,  20];
-    default:            return [40, 25, 15, 10, 10, 0];
+    case "Chegada":      return [55, 25, 10, 5,  5,  0];
+    case "Organização":  return [45, 25, 15, 8,  7,  0];
+    case "Tensão":       return [35, 20, 20, 12, 5,  8];
+    case "Desconfiança": return [28, 18, 22, 18, 4,  10];
+    case "Paranoia":     return [22, 15, 22, 22, 2,  17];
+    case "Desespero":    return [18, 12, 22, 25, 0,  23];
+    case "Colapso":      return [15, 10, 25, 25, 0,  25];
+    default:             return [40, 25, 15, 10, 5,  5];
   }
 }
 
@@ -296,7 +375,7 @@ function pesosPorFase() {
 //  RENDERIZAÇÃO
 // ============================================================
 function renderCabecalho() {
-  document.getElementById("info-dia").textContent = `📅 Dia ${estado.dia}`;
+  document.getElementById("info-dia").textContent = `📅 Dia ${estado.dia} (est. ${estado.duracao})`;
   document.getElementById("info-clima").textContent = `☀️ ${estado.clima}`;
   document.getElementById("info-fase").textContent = `🌅 ${faseAtual()}`;
   document.getElementById("info-comida").textContent = `🍖 ${estado.recursos.comida.toFixed(1)}`;
@@ -309,10 +388,14 @@ function renderStatus() {
   const painel = document.getElementById("painel-status");
   painel.innerHTML = "";
   estado.personagens.forEach(p => {
-    if (p.status === "morto") return;
-    const emoji = p.energia > 60 ? "💚" : p.energia > 30 ? "💛" : "❤️";
+    const emoji = p.status === "morto" ? "🖤" : p.energia > 60 ? "💚" : p.energia > 30 ? "💛" : "❤️";
+    const classes = ["cartao-personagem"];
+    if (p.isPlayer) classes.push("jogador");
+    if (p.status === "ferido") classes.push("ferido");
+    if (p.status === "morto") classes.push("morto-visivel");
+
     const div = document.createElement("div");
-    div.className = "cartao-personagem" + (p.isPlayer ? " jogador" : "") + (p.status === "ferido" ? " ferido" : "");
+    div.className = classes.join(" ");
     div.innerHTML = `
       <strong>${emoji} ${p.nome}${p.isPlayer ? " (VOCÊ)" : ""}</strong><br>
       ${p.status} • Afeto: ${p.afeto} • Suspeita: ${p.suspeita}
@@ -330,7 +413,6 @@ function logar(msg, classe = "") {
   log.appendChild(p);
   log.scrollTop = log.scrollHeight;
 }
-
 function limparLog() { document.getElementById("log").innerHTML = ""; }
 
 // ============================================================
@@ -348,6 +430,7 @@ function passarDia() {
 
   logar(`📅 DIA ${estado.dia} • ${estado.clima}`, "destaque");
 
+  // Clima
   const climas = [
     { nome: "ensolarado",  efeito: () => {}, emoji: "☀️" },
     { nome: "chuvoso",     efeito: () => ajustarRecurso("agua", 2), emoji: "🌧️" },
@@ -361,7 +444,8 @@ function passarDia() {
   climaHoje.efeito();
   logar(`${climaHoje.emoji} Clima: ${climaHoje.nome}.`, "clima");
 
-  const num = 2 + Math.floor(Math.random() * 3);
+  // Eventos
+  const num = estado.eventosPorDia;
   const tipos = ["vida", "romance", "conflito", "investigacao", "descoberta", "noite"];
   const pesos = pesosPorFase();
 
@@ -377,26 +461,30 @@ function passarDia() {
     if (ev) logar(ev.txt, ev.classe);
   }
 
-  if (estado.dia >= 2 && estado.traidor.status === "vivo") {
-    const chance = 0.25 + estado.dia * 0.04;
+  // Traição
+  if (estado.dia >= estado.diaInicioTraicao && estado.traidor.status === "vivo") {
+    const progresso = clamp(estado.dia / estado.duracao, 0, 1.2);
+    const chance = 0.15 + progresso * 0.35;
     if (Math.random() < chance) {
       const ev = rodarEventoTraicao();
       if (ev) logar(ev.txt, ev.classe);
     }
   }
 
+  // Consumo
   const v = vivos();
-  estado.recursos.comida = Math.max(0, estado.recursos.comida - v.length * 0.4);
-  estado.recursos.agua = Math.max(0, estado.recursos.agua - v.length * 0.4);
+  estado.recursos.comida = Math.max(0, estado.recursos.comida - v.length * 0.35);
+  estado.recursos.agua = Math.max(0, estado.recursos.agua - v.length * 0.35);
 
   if (estado.recursos.comida <= 0 || estado.recursos.agua <= 0) {
     const vitima = aleatorio(v);
     if (vitima) {
-      vitima.energia = Math.max(0, vitima.energia - 25);
+      vitima.energia = Math.max(0, vitima.energia - 20);
       logar(`⚠️ ${vitima.nome} está enfraquecido(a) pela falta de recursos!`, "destaque");
     }
   }
 
+  // Mortes por exaustão
   estado.personagens.forEach(p => {
     if (p.energia <= 0 && p.status === "vivo") {
       p.status = "morto";
@@ -408,21 +496,38 @@ function passarDia() {
   renderCabecalho();
   renderStatus();
 
+  // Detectar se o jogador morreu
+  if (estado.jogador.status === "morto" && !estado.espectador) {
+    estado.espectador = true;
+    document.getElementById("aviso-espectador").classList.remove("oculto");
+    logar(`👻 ${estado.jogador.nome} morreu. Você agora é espectador — a história continua.`, "destaque");
+  }
+
+  // Verifica fim (apenas traidor descoberto ou todos os inocentes mortos)
   const tipoFim = verificarFim();
   if (tipoFim) { finalizar(tipoFim); return; }
 
-  if (estado.dia >= 5 && estado.dia % 3 === 0 && vivos().length > 2) {
+  // Votação agendada
+  const deveVotar = estado.dia >= 6 && estado.dia % estado.intervaloVotacao === 0 && vivos().length > 2;
+  if (deveVotar) {
     abrirVotacao();
   }
 }
 
+// ============================================================
+//  FIM (só termina se traidor descoberto ou todos os inocentes mortos)
+// ============================================================
 function verificarFim() {
-  if (estado.traidor.status === "morto") return "vitoria_traidor";
-  if (estado.jogador.status === "morto") return "morte_jogador";
+  // Vitória: traidor eliminado por votação correta
+  if (estado.traidorEliminadoPorVotacao) return "vitoria_traidor";
+
+  // Derrota total: todos os inocentes mortos (só o traidor vivo)
+  const inocentes = inocentesVivos();
+  if (inocentes.length === 0) return "todos_inocentes_mortos";
+
+  // Derrota total: ninguém vivo
   if (!vivos().length) return "todos_mortos";
-  if (estado.dia > MAX_DIAS) {
-    return estado.traidor.status === "vivo" ? "resgate_com_traidor" : "resgate";
-  }
+
   return null;
 }
 
@@ -456,6 +561,7 @@ function resolverVotacao(alvoEscolhido, candidatos) {
   const votos = {};
   candidatos.forEach(p => votos[p.nome] = 0);
 
+  // Votos: jogador escolhe, NPCs votam pelo mais suspeito (ou no escolhido se afeto > 60)
   vivos().forEach(p => {
     if (p.isPlayer) {
       votos[alvoEscolhido.nome]++;
@@ -474,6 +580,8 @@ function resolverVotacao(alvoEscolhido, candidatos) {
   logar(`⚖️ O grupo decidiu eliminar: ${eliminado.nome}`, "destaque");
 
   if (eliminado.traidor) {
+    eliminado.status = "morto";
+    estado.traidorEliminadoPorVotacao = true;
     logar(`🎉 VOCÊS ACERTARAM! ${eliminado.nome} era o traidor!`, "destaque");
     finalizar("vitoria_traidor");
     return;
@@ -481,8 +589,13 @@ function resolverVotacao(alvoEscolhido, candidatos) {
 
   eliminado.status = "morto";
   logar(`💔 ${eliminado.nome} era inocente. O traidor ainda está entre vocês...`, "morte");
+  estado.votacoesFeitas++;
 
   renderStatus();
+
+  const tipoFim = verificarFim();
+  if (tipoFim) { finalizar(tipoFim); return; }
+
   document.getElementById("btn-proximo-dia").disabled = false;
 }
 
@@ -501,6 +614,7 @@ function revelarTraidor() {
     <span class="tag-traidor">🎭 ${t.tracos}</span>
     <span class="tag-traidor">💀 Status: ${t.status}</span>
     <span class="tag-traidor">🔍 Suspeita final: ${t.suspeita}</span>
+    <span class="tag-traidor">🗡️ Tentativas: ${t.tentativasAssassinato}</span>
     <span class="tag-traidor">📅 Dia final: ${estado.dia - 1}</span>
   `;
 
@@ -517,6 +631,7 @@ function finalizar(tipo) {
 
   document.getElementById("btn-proximo-dia").disabled = true;
   document.getElementById("btn-espiar").classList.add("oculto");
+  document.getElementById("btn-pular").classList.add("oculto");
 
   const acoes = document.getElementById("acoes");
   if (!document.getElementById("btn-reiniciar-inline")) {
@@ -532,21 +647,13 @@ function finalizar(tipo) {
       titulo: "🎉 O TRAIDOR FOI ELIMINADO!",
       texto: "Vocês descobriram a verdade e salvaram o grupo."
     },
-    morte_jogador: {
-      titulo: "💀 VOCÊ MORREU.",
-      texto: `O traidor era ${estado.traidor.nome}. A ilha guardou mais um segredo.`
+    todos_inocentes_mortos: {
+      titulo: "☠️ TODOS OS INOCENTES MORRERAM.",
+      texto: `O traidor era ${estado.traidor.nome}. Ele(a) venceu. A ilha agora pertence a ele(a).`
     },
     todos_mortos: {
       titulo: "☠️ TODOS MORRERAM.",
       texto: "A ilha reivindicou todos vocês. Nenhuma história restou para contar."
-    },
-    resgate_com_traidor: {
-      titulo: "🚁 RESGATE CHEGOU... MAS O TRAIDOR ESCAPOU.",
-      texto: `O traidor era ${estado.traidor.nome} e se infiltrou entre os sobreviventes.`
-    },
-    resgate: {
-      titulo: "🚁 RESGATE CHEGOU!",
-      texto: "Vocês sobreviveram... e descobriram que a ilha não era o maior perigo."
     }
   };
 
@@ -555,7 +662,30 @@ function finalizar(tipo) {
 }
 
 // ============================================================
-//  TELA INICIAL: 11 CAMPOS DE AMIGOS
+//  PULAR PARA O DESFECHO
+// ============================================================
+function pularParaDesfecho() {
+  if (estado.fim) return;
+  logar(`\n⏩ Acelerando o desfecho...`, "destaque");
+
+  let seguranca = 0;
+  while (!estado.fim && seguranca < 200) {
+    seguranca++;
+    passarDia();
+    // Se uma votação abriu, resolvemos automaticamente escolhendo o mais suspeito
+    const painelVotacao = document.getElementById("painel-votacao");
+    if (!painelVotacao.classList.contains("oculto")) {
+      const candidatos = vivos().filter(p => !p.isPlayer);
+      if (candidatos.length) {
+        const maisSuspeito = candidatos.reduce((a, b) => a.suspeita > b.suspeita ? a : b);
+        resolverVotacao(maisSuspeito, candidatos);
+      }
+    }
+  }
+}
+
+// ============================================================
+//  TELA INICIAL
 // ============================================================
 function criarCamposAmigos() {
   const grid = document.getElementById("grid-amigos");
@@ -577,15 +707,11 @@ function criarCamposAmigos() {
     inp.maxLength = 20;
     inp.autocomplete = "off";
 
-    // Enter avança para o próximo campo
     inp.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        if (i < 11) {
-          document.getElementById(`amigo-${i + 1}`)?.focus();
-        } else {
-          document.getElementById("btn-comecar").focus();
-        }
+        if (i < 11) document.getElementById(`amigo-${i + 1}`)?.focus();
+        else document.getElementById("btn-comecar").focus();
       }
     });
 
@@ -596,14 +722,12 @@ function criarCamposAmigos() {
 }
 
 // ---------- localStorage ----------
-function salvarNomes(nomeJogador, amigos) {
+function salvarConfig(nomeJogador, amigos, duracao) {
   try {
-    const dados = { nomeJogador, amigos };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
-  } catch (e) { /* ignora se localStorage indisponível */ }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ nomeJogador, amigos, duracao }));
+  } catch {}
 }
-
-function carregarNomes() {
+function carregarConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
@@ -613,7 +737,12 @@ function carregarNomes() {
       const inp = document.getElementById(`amigo-${i + 1}`);
       if (inp) inp.value = n;
     });
-  } catch (e) { /* ignora */ }
+    if (typeof dados.duracao === "number") {
+      const d = clamp(dados.duracao, 10, 40);
+      document.getElementById("input-dias").value = d;
+      document.getElementById("dias-valor").textContent = d;
+    }
+  } catch {}
 }
 
 // ============================================================
@@ -621,6 +750,7 @@ function carregarNomes() {
 // ============================================================
 function iniciar() {
   const nome = document.getElementById("nome-jogador").value.trim() || "Você";
+  const duracao = parseInt(document.getElementById("input-dias").value, 10) || 25;
 
   const nomes = [];
   for (let i = 1; i <= 11; i++) {
@@ -631,8 +761,6 @@ function iniciar() {
   }
 
   const aviso = document.getElementById("aviso-inicio");
-
-  // Remove duplicados e nome igual ao do jogador
   const unicos = [];
   nomes.forEach(n => {
     const igual = unicos.some(u => u.toLowerCase() === n.toLowerCase());
@@ -640,29 +768,28 @@ function iniciar() {
     if (!igual && !igualJogador) unicos.push(n);
   });
 
-  if (unicos.length < 1) {
-    aviso.textContent = "⚠️ Digite pelo menos 1 nome de amigo.";
+  if (unicos.length < 2) {
+    aviso.textContent = "⚠️ Digite pelo menos 2 nomes de amigos (é preciso ter alguém para votar e alguém para ser traidor).";
     return;
   }
-
   if (unicos.length < nomes.length) {
     aviso.textContent = "⚠️ Alguns nomes repetidos foram ignorados.";
   } else {
     aviso.textContent = "";
   }
 
-  // Salva no localStorage
-  salvarNomes(nome, unicos);
-
-  novoJogo(nome, unicos);
+  salvarConfig(nome, unicos, duracao);
+  novoJogo(nome, unicos, duracao);
 
   document.getElementById("tela-inicio").classList.remove("ativa");
   document.getElementById("tela-jogo").classList.add("ativa");
 
   limparLog();
-  logar(`🏝️ ${nome}, você e seus amigos estão presos na ilha após um naufrágio.`, "destaque");
+  logar(`🏝️ ${nome}, você e seus amigos estão presos na ilha.`, "destaque");
   logar(`🌑 Alguém entre vocês está planejando algo terrível...`, "destaque");
   logar(`👥 Grupo: ${estado.personagens.map(p => p.nome).join(", ")}`, "clima");
+  logar(`⏳ A ilha não vai embora sozinha. O jogo só termina quando o traidor for eliminado por votação ou quando todos os inocentes morrerem.`, "clima");
+  logar(`🗳️ Haverá votações a cada ${estado.intervaloVotacao} dias a partir do dia 6.`, "clima");
 
   renderCabecalho();
   renderStatus();
@@ -674,6 +801,9 @@ function iniciar() {
   document.getElementById("btn-espiar").onclick = () => {
     if (estado.traidor) revelarTraidor();
   };
+
+  document.getElementById("btn-pular").classList.remove("oculto");
+  document.getElementById("btn-pular").onclick = pularParaDesfecho;
 }
 
 function reiniciar() {
@@ -687,10 +817,12 @@ function reiniciar() {
   }
 
   document.getElementById("aviso-inicio").textContent = "";
+  document.getElementById("aviso-espectador").classList.add("oculto");
 
   document.getElementById("painel-traidor").classList.add("oculto");
   document.getElementById("traidor-info").innerHTML = "";
   document.getElementById("btn-espiar").classList.add("oculto");
+  document.getElementById("btn-pular").classList.add("oculto");
 
   const btnInline = document.getElementById("btn-reiniciar-inline");
   if (btnInline) btnInline.remove();
@@ -698,8 +830,7 @@ function reiniciar() {
   document.getElementById("painel-votacao").classList.add("oculto");
   document.getElementById("painel-votacao").innerHTML = "";
 
-  // Recarrega nomes salvos
-  carregarNomes();
+  carregarConfig();
 }
 
 // ============================================================
@@ -707,7 +838,13 @@ function reiniciar() {
 // ============================================================
 document.addEventListener("DOMContentLoaded", () => {
   criarCamposAmigos();
-  carregarNomes();
+  carregarConfig();
+
+  const slider = document.getElementById("input-dias");
+  const diasValor = document.getElementById("dias-valor");
+  slider.addEventListener("input", () => {
+    diasValor.textContent = slider.value;
+  });
 
   document.getElementById("btn-comecar").onclick = iniciar;
   document.getElementById("btn-reiniciar").onclick = reiniciar;
