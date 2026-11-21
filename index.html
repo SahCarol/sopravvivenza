@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🏝️ Ilha da Traição</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- TELA INICIAL -->
+    <section id="tela-inicio" class="tela ativa">
+      <h1>🏝️ Ilha da Traição</h1>
+      <p class="subtitulo">Sobrevivência • Romance • Traição</p>
+      <p>Você e seus amigos estão presos em uma ilha isolada.<br>
+         Mas <strong>alguém entre vocês não é quem diz ser...</strong></p>
+
+      <label for="nome-jogador">Seu nome:</label>
+      <input id="nome-jogador" type="text" placeholder="Digite seu nome" maxlength="20" />
+
+      <label for="nomes-amigos">Nomes dos amigos (um por linha, até 11):</label>
+      <textarea id="nomes-amigos" rows="6" placeholder="Alex&#10;Sam&#10;Riley&#10;..."></textarea>
+
+      <button id="btn-comecar">▶️ Começar Jogo</button>
+      <p id="aviso-inicio" class="aviso"></p>
+    </section>
+
+    <!-- TELA DO JOGO -->
+    <section id="tela-jogo" class="tela">
+      <header id="cabecalho">
+        <div>
+          <span id="info-dia">📅 Dia 1</span>
+          <span id="info-clima">☀️ ensolarado</span>
+        </div>
+        <div>
+          <span id="info-comida">🍖 15</span>
+          <span id="info-agua">💧 15</span>
+          <span id="info-abrigo">⛺ 5</span>
+          <span id="info-pistas">🔍 0</span>
+        </div>
+      </header>
+
+      <div id="painel-status"></div>
+
+      <div id="log"></div>
+
+      <div id="acoes">
+        <button id="btn-proximo-dia">▶️ Próximo Dia</button>
+        <button id="btn-votar" class="oculto">🗳️ Votar</button>
+      </div>
+
+      <div id="painel-votacao" class="oculto"></div>
+    </section>
+
+    <!-- TELA FINAL -->
+    <section id="tela-fim" class="tela">
+      <h2 id="titulo-fim"></h2>
+      <p id="texto-fim"></p>
+      <button id="btn-reiniciar">🔄 Jogar Novamente</button>
+    </section>
+
+  </div>
+  <script src="jogo.js"></script>
+</body>
+</html>
