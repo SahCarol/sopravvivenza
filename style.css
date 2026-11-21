@@ -182,3 +182,30 @@ button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow
   #cabecalho { font-size: 0.8rem; }
   #cabecalho span { margin-right: 8px; }
 }
+
+/* ---------- AVISO DE ESPECTADOR ---------- */
+#aviso-espectador {
+  background: rgba(150, 150, 255, 0.15);
+  border: 1px solid #b8c0ff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  color: #d0d5ff;
+  font-size: 0.92rem;
+  text-align: center;
+  animation: fadeIn 0.5s ease;
+}
+
+/* ---------- BOTÃO DE PULAR ---------- */
+#btn-pular {
+  background: linear-gradient(135deg, #ffd166, #d69e2e);
+  color: #2d1b00;
+}
+#btn-pular:hover { box-shadow: 0 6px 18px rgba(255, 209, 102, 0.4); }
+
+/* ---------- PERSONAGEM MORTO (espectador) ---------- */
+.cartao-personagem.morto-visivel {
+  opacity: 0.5;
+  text-decoration: line-through;
+  border-color: #555;
+}
