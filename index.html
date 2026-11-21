@@ -9,34 +9,36 @@
 <body>
   <div id="app">
 
-    <!-- TELA INICIAL -->
+    <!-- ================= TELA INICIAL ================= -->
     <section id="tela-inicio" class="tela ativa">
       <h1>🏝️ Ilha da Traição</h1>
       <p class="subtitulo">Sobrevivência • Romance • Traição</p>
-      <p>Você e seus amigos estão presos em uma ilha isolada.<br>
-         Mas <strong>alguém entre vocês não é quem diz ser...</strong></p>
+      <p>Você e seus amigos estão presos em uma ilha isolada após um naufrágio.<br>
+         Os mantimentos são poucos. As noites são longas.<br>
+         E <strong>alguém entre vocês não é quem diz ser...</strong></p>
 
-      <label for="nome-jogador">Seu nome:</label>
-      <input id="nome-jogador" type="text" placeholder="Digite seu nome" maxlength="20" />
+      <label for="nome-jogador">Seu nome (personagem principal):</label>
+      <input id="nome-jogador" type="text" placeholder="Digite seu nome" maxlength="20" autocomplete="off" />
 
-      <label for="nomes-amigos">Nomes dos amigos (um por linha, até 11):</label>
-      <textarea id="nomes-amigos" rows="6" placeholder="Alex&#10;Sam&#10;Riley&#10;..."></textarea>
+      <label>Nomes dos amigos (até 11 — deixe em branco os que não quiser):</label>
+      <div id="grid-amigos" class="grid-amigos"></div>
 
       <button id="btn-comecar">▶️ Começar Jogo</button>
       <p id="aviso-inicio" class="aviso"></p>
     </section>
 
-    <!-- TELA DO JOGO -->
+    <!-- ================= TELA DO JOGO ================= -->
     <section id="tela-jogo" class="tela">
       <header id="cabecalho">
         <div>
           <span id="info-dia">📅 Dia 1</span>
           <span id="info-clima">☀️ ensolarado</span>
+          <span id="info-fase">🌅 Chegada</span>
         </div>
         <div>
-          <span id="info-comida">🍖 15</span>
-          <span id="info-agua">💧 15</span>
-          <span id="info-abrigo">⛺ 5</span>
+          <span id="info-comida">🍖 18</span>
+          <span id="info-agua">💧 18</span>
+          <span id="info-abrigo">⛺ 6</span>
           <span id="info-pistas">🔍 0</span>
         </div>
       </header>
@@ -45,15 +47,21 @@
 
       <div id="log"></div>
 
+      <!-- Painel do traidor — aparece abaixo do histórico -->
+      <div id="painel-traidor" class="oculto">
+        <h3>🕵️ O TRAIDOR ERA...</h3>
+        <div id="traidor-info"></div>
+      </div>
+
       <div id="acoes">
         <button id="btn-proximo-dia">▶️ Próximo Dia</button>
-        <button id="btn-votar" class="oculto">🗳️ Votar</button>
+        <button id="btn-espiar" class="oculto">👁️ Espiar Traidor (debug)</button>
       </div>
 
       <div id="painel-votacao" class="oculto"></div>
     </section>
 
-    <!-- TELA FINAL -->
+    <!-- ================= TELA FINAL ================= -->
     <section id="tela-fim" class="tela">
       <h2 id="titulo-fim"></h2>
       <p id="texto-fim"></p>
